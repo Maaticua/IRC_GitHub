@@ -2,6 +2,7 @@
 #define SERVER_HPP
 
 #include "Client.hpp"
+#include "Channel.hpp"
 #include "Colors.hpp"
 #include <iostream>
 #include <vector>
@@ -20,6 +21,7 @@ class Server
 		std::vector<struct pollfd> _fds;
 		Server(const Server &src);
 		Server &operator=(const Server &src);
+		std::map<std::string, Channel*> _channels;
 
 	public:
 		Server(int port, std::string password);
@@ -31,6 +33,7 @@ class Server
 		void acceptNewClient();
 		void handleClientMessage(size_t i);
 		void processCommand(int fd, std::string command);
+		void sendResponse(int fd, std::string reponse);
 };
 
 #endif
