@@ -10,7 +10,9 @@ class Channel
 {
 	public:
 		std::string name;
+		std::string topic;
 		std::vector<Client *> members;
+		std::vector<std::string> invited_user;
 		std::vector<Client*> operators;
 
 		Channel(std::string n) : name(n) {}

@@ -22,6 +22,7 @@ class Server
 		Server(const Server &src);
 		Server &operator=(const Server &src);
 		std::map<std::string, Channel*> _channels;
+		void leaveAllChannel(Client *client);
 
 	public:
 		Server(int port, std::string password);

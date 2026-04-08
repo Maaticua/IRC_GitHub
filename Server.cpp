@@ -145,9 +145,10 @@ void Server::handleClientMessage(size_t i)
 	if (byte_recieved <= 0)
 	{
 		std::cout << RED << "Client on fd " << fd << " disconected" << RESET << std::endl;
-		_clientBuffer.erase(fd);
 		if (_clients.count(fd))
 		{
+			leaveAllChannel(_clients[fd]);
+			_clientBuffer.erase(fd);
 			delete _clients[fd];
 			_clients.erase(fd);
 		}
@@ -237,7 +238,7 @@ void Server::processCommand(int fd, std::string commande)
 		}
 		if (chanName.empty() || chanName[0] != '#')
 		{
-			sendResponse(fd, "403 " + client->nickname + " " + chanName + " :No cahnnel");
+			sendResponse(fd, "403 " + client->nickname + " " + chanName + " :No channel");
 			return;
 		}
 		if (_channels.find(chanName) == _channels.end())
@@ -284,7 +285,7 @@ void Server::processCommand(int fd, std::string commande)
 		if (target[0] == '#')
 		{
 			if (_channels.find(target) == _channels.end())
-				sendResponse(fd, "403 " + client->nickname + " " + target + ":No such cahnnel");
+				sendResponse(fd, "403 " + client->nickname + " " + target + ":No such channel");
 			else
 			{
 				std::string formattedMsg = ":" + client->nickname + "!" + client->username + "@localhost PRIVMSG " + target + " :" + text;
@@ -312,10 +313,229 @@ void Server::processCommand(int fd, std::string commande)
 				sendResponse(fd, "401 " + client->nickname + " " + target + " :No such nick/channel");
 		}
 	}
+	else if (cmdName == "KICK")
+	{
+		std::string chanName, targetNick, reason;
+		ss >> chanName >> targetNick;
+		std::getline(ss, reason);
+
+		if (!reason.empty() && reason[0] == ' ')
+			reason.erase(0, 1);
+		if (!reason.empty() && reason[0] == ':')
+			reason.erase(0, 1);
+		if (reason.empty())
+			reason = "Kicked by operator";
+
+		if (_channels.find(chanName) == _channels.end())
+		{
+			sendResponse(fd, "403 " + client->nickname + " " + chanName + " :No such channel");
+			return;
+		}
+		Channel *chan = _channels[chanName];
+
+		bool isOP = false;
+		for (size_t i = 0; i < chan->operators.size(); i++)
+		{
+			if (chan->operators[i]->fd == fd)
+			{
+				isOP = true;
+				break;
+			}
+		}
+
+		if (!isOP)
+		{
+			sendResponse(fd, "482 " + client->nickname + " " + chanName + " :You are not channel operator");
+			return;
+		}
+
+		Client *targetClient = NULL;
+		std::vector<Client*>::iterator it;
+		for (it = chan->members.begin(); it != chan->members.end(); ++it)
+		{
+			if ((*it)->nickname == targetNick)
+			{
+				targetClient = *it;
+				break;
+			}
+		}
+
+		if (!targetClient)
+		{
+			sendResponse(fd, "441 " + targetNick + " " + chanName + " :They are not on that channel");
+			return;
+		}
+
+		std::string kickClient = ":" + client->nickname + "!" + client->username + "@localhost KICK " + chanName + " " + targetNick + " :" + reason;
+		chan->broadcast(kickClient, -1);
+
+		chan->members.erase(it);
+
+		for (std::vector<Client*>::iterator oit = chan->operators.begin(); oit != chan->operators.end(); ++oit)
+		{
+			if ((*oit)->fd == targetClient->fd)
+			{
+				chan->operators.erase(oit);
+				break;
+			}
+		}
+	}
+	else if (cmdName == "TOPIC")
+	{
+		std::string chanName, newTopic;
+		ss >> chanName;
+		std::getline(ss, newTopic);
+
+		if (_channels.find(chanName) == _channels.end())
+		{
+			sendResponse(fd, "403 " + client->nickname + " " + chanName + " : No such channel");
+			return;
+		}
+
+		Channel *chan = _channels[chanName];
+		bool isMember = false;
+
+		for (size_t i = 0; i < chan->members.size(); i++)
+			if (chan->members[i]->fd == fd)
+				isMember = true;
+
+		if (!isMember)
+		{
+			sendResponse(fd, "331 " + client->nickname + " " + chanName + " :You're not on that channel");
+			return;
+		}
+
+		if (newTopic.empty())
+		{
+			if (chan->topic.empty())
+				sendResponse(fd, "332 " + client->nickname + " " + chanName + " : No topic is set");
+			else
+				sendResponse(fd, "442 " + client->nickname + " " + chanName + " :" + chan->topic);
+		}
+		else
+		{
+			if (newTopic[1] == ':')
+				newTopic = newTopic.substr(2);
+			else
+				newTopic = newTopic.substr(1);
+
+			chan->topic = newTopic;
+			std::string msg = ":" + client->nickname + "!" + client->username + "@localhost TOPIC " + chanName + " :" + chan->topic;
+			chan->broadcast(msg, -1);
+		}
+	}
+	else if (cmdName == "INVITE")
+	{
+		std::string targetNick, chanName;
+		ss >> targetNick >> chanName;
+
+		if (targetNick.empty() || chanName.empty())
+		{
+			sendResponse(fd, "461 " + client->nickname + " INVITE :Not enough parameters");
+			return;
+		}
+
+		if (_channels.find(chanName) == _channels.end())
+		{
+			sendResponse(fd, "403 " + client->nickname + " " + chanName + " :No such channel");
+			return;
+		}
+
+		Channel *chan = _channels[chanName];
+		bool isMember = false;
+		for (size_t i = 0; i < chan->members.size(); i++)
+			if (chan->members[i]->fd == fd) isMember = true;
+
+		if (!isMember)
+		{
+			sendResponse(fd, "442 " + client->nickname + " " + chanName + " :You're not on that channel");
+			return;
+		}
+
+		Client *targetClient = NULL;
+		std::map<int, Client*>::iterator it;
+		for (it = _clients.begin(); it != _clients.end(); ++it)
+		{
+			if (it->second->nickname == targetNick)
+			{
+				targetClient = it->second;
+				break;
+			}
+		}
+
+		if (!targetClient)
+		{
+			sendResponse(fd, "401 " + client->nickname + " " + targetNick + " :No such nickname");
+			return;
+		}
+
+		for (size_t i = 0; i < chan->members.size(); i++)
+		{
+			if (chan->members[i]->nickname == targetNick)
+			{
+				sendResponse(fd, "443 " + client->nickname + " " + targetNick + " " + chanName + " :is already on channel");
+				return;
+			}
+		}
+
+		chan->invited_user.push_back(targetNick);
+		std::string inviteMsg = ":" + client->nickname + "!" + client->username + "@localhost INVITE " + targetNick + " :" + chanName;
+		sendResponse(targetClient->fd, inviteMsg);
+
+		sendResponse(fd, "341 " + client->nickname + " " + targetNick + " " + chanName);
+
+	}
 }
+
 void Server::sendResponse(int fd, std::string reponse)
 {
 	std::string msg = reponse + "\r\n";
 	if (send(fd, msg.c_str(), msg.length(),0) == -1)
 		std::cerr << RED << "Error: send fail" << RESET << std::endl;
+}
+
+void Server::leaveAllChannel(Client *client)
+{
+	std::map<std::string, Channel*>::iterator it = _channels.begin();
+
+	while (it != _channels.end())
+	{
+		Channel *chan = it->second;
+		bool found = false;
+
+		for (std::vector<Client*>::iterator mit = chan->members.begin(); mit != chan->members.end(); ++mit)
+		{
+			if ((*mit)->fd == client->fd)
+			{
+				chan->members.erase(mit);
+				found = true;
+				break;
+			}
+		}
+
+		for (std::vector<Client*>::iterator oit = chan->operators.begin(); oit != chan->operators.end(); ++oit)
+		{
+			if ((*oit)->fd == client->fd)
+			{
+				chan->operators.erase(oit);
+				break;
+			}
+		}
+
+		if (found)
+		{
+			std::string partMsg = ":" + client->nickname + "!" + client->username + "@localhost PART " + chan->name + " : Disconnected";
+			chan->broadcast(partMsg, -1);
+		}
+
+		if (chan->members.empty())
+		{
+			delete chan;
+			_channels.erase(it++);
+		}
+		else
+		{
+			++it;
+		}
+	}
 }
