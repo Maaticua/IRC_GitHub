@@ -15,6 +15,11 @@ class Channel
 		std::vector<std::string> invited_user;
 		std::vector<Client*> operators;
 
+		bool mode_i;
+		bool mode_t;
+		std::string key;
+		int max_user;
+
 		Channel(std::string n) : name(n) {}
 
 		void broadcast(std::string msg, int sender_fd)

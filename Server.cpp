@@ -401,16 +401,16 @@ void Server::processCommand(int fd, std::string commande)
 
 		if (!isMember)
 		{
-			sendResponse(fd, "331 " + client->nickname + " " + chanName + " :You're not on that channel");
+			sendResponse(fd, "442 " + client->nickname + " " + chanName + " :You're not on that channel");
 			return;
 		}
 
 		if (newTopic.empty())
 		{
 			if (chan->topic.empty())
-				sendResponse(fd, "332 " + client->nickname + " " + chanName + " : No topic is set");
+				sendResponse(fd, "331 " + client->nickname + " " + chanName + " : No topic is set");
 			else
-				sendResponse(fd, "442 " + client->nickname + " " + chanName + " :" + chan->topic);
+				sendResponse(fd, "332 " + client->nickname + " " + chanName + " :" + chan->topic);
 		}
 		else
 		{
@@ -484,6 +484,153 @@ void Server::processCommand(int fd, std::string commande)
 
 		sendResponse(fd, "341 " + client->nickname + " " + targetNick + " " + chanName);
 
+	}
+	else if (cmdName == "MODE")
+	{
+		std::string target, flags, param;
+		ss >> target >> flags;
+
+		if (target[0] != '#')
+			return;
+
+		if (_channels.find(target) == _channels.end())
+		{
+			sendResponse(fd, "403 " + client->nickname + " " + target + " :No such channel");
+			return;
+		}
+
+		Channel *chan = _channels[target];
+		bool isOP = false;
+
+		for (size_t i = 0; i < chan->operators.size(); i++)
+			if (chan->operators[i]->fd == fd)
+				isOP = true;
+
+		if (!isOP)
+		{
+			sendResponse(fd, "482 " + client->nickname + " " + target + " : You are not channel operator");
+			return;
+		}
+
+		if (flags.empty())
+			return ;
+
+		bool add = true; // on part du principe qu'on ajoute
+
+		std::string appliedModes = "";
+		std::string appliedParams = "";
+
+		for (size_t i = 0; i < flags.size(); i++)
+		{
+			char c = flags[i];
+
+			if (c == '+')
+			{
+				add = true;
+				appliedModes += "+";
+			}
+			else if (c == '-')
+			{
+				add = false;
+				appliedModes += "-";
+			}
+			else if (c == 'i')
+			{
+				chan->mode_i = add; // true si +, false si -
+				appliedModes += "i";
+			}
+			else if (c == 't')
+			{
+				chan->mode_t = add;
+				appliedModes += "t";
+			}
+			else if (c == 'k')
+			{
+				if (add)
+				{
+					if (ss >> param) // on essaie de lire le mdp
+					{
+						chan->key = param;
+						appliedModes += "k";
+						appliedModes += " " + param;
+					}
+				}
+				else
+				{
+					chan->key = ""; //si on retire on efface le mdp
+					appliedModes += "k";
+				}
+			}
+			else if (c == 'l')
+			{
+				if (add)
+				{
+					if (ss >> param) // on essaie de lire la limite
+					{
+						chan->max_user = std::atoi(param.c_str());
+						appliedModes += "l";
+						appliedParams += " " + param;
+					}
+				}
+				else
+				{
+					chan->max_user = 0;
+					appliedModes += "l";
+				}
+			}
+			else if (c == 'o')
+			{
+				if (ss >> param) // on a besoin du pseudo
+				{
+					Client* targetClient = NULL;
+
+					for (size_t j = 0; j < chan->members.size(); j++)
+					{
+						if (chan->members[j]->nickname == param)
+						{
+							targetClient = chan->members[j];
+							break;
+						}
+					}
+					if (targetClient)
+					{
+						if (add)
+						{
+							bool alreadyOp = false;
+							for (size_t j = 0; j < chan->operators.size(); j++)
+							{
+								if (chan->operators[j]->fd == targetClient->fd)
+									alreadyOp = true;
+							}
+							if (!alreadyOp)
+							{
+								chan->operators.push_back(targetClient);
+								appliedModes += "o";
+								appliedParams += " " + param;
+							}
+						}
+						else
+						{
+							for (std::vector<Client*>::iterator it = chan->operators.begin(); it != chan->operators.end(); it++)
+							{
+								if ((*it)->fd == targetClient->fd)
+								{
+									chan->operators.erase(it);
+									appliedModes += "o";
+									appliedParams += " " + param;
+									break;
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+		if (appliedModes != "+" && appliedModes != "-" && appliedModes.empty()) // si on a au moins un mode on l'annonce
+		{
+			std::string modeNotif = ":" + client->nickname + "!" + client->username + "@localhost MODE " + target + " " + appliedModes + appliedParams;
+			chan->broadcast(modeNotif, -1);
+		}
 	}
 }
 
