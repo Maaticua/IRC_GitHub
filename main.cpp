@@ -23,11 +23,18 @@ int main(int ac, char **av)
 	signal(SIGINT, signalHandler);
 	signal(SIGQUIT, signalHandler);
 
-	int port = std::atoi(av[1]);
-	std::string password = av[2];
-	Server ircServer(port, password);
-	ircServer.init();
-	ircServer.run();
-
+	try
+	{
+		int port = std::atoi(av[1]);
+		std::string password = av[2];
+		Server ircServer(port, password);
+		ircServer.init();
+		ircServer.run();
+	}
+	catch (const std::exception &e)
+	{
+		std::cerr << RED << "Fatal Error: " << e.what() << RESET << std::endl;
+		return 1;
+	}
 	return 0;
 }

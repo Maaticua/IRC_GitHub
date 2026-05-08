@@ -207,7 +207,7 @@ void Server::processCommand(int fd, std::string commande)
 		sendResponse(fd, "451 * : Not provided the good password");
 		return;
 	}
-	else if (cmdName == "NICK")
+	else if (cmdName == "NICK" || cmdName == "nick")
 	{
 		std::string nick;
 		ss >> nick;
@@ -231,12 +231,37 @@ void Server::processCommand(int fd, std::string commande)
 			}
 			else
 			{
+				std::string oldNick = client->nickname;
 				client->nickname = nick;
 				std::cout << "Client fd " << fd << " is known as " << nick << std::endl;
+
 				if (!client->username.empty() && !client->is_registered)
 				{
 					client->is_registered = true;
 					sendResponse(fd, "001 " + client->nickname + " : Welcome to the IRC server");
+				}
+				else if(client->is_registered)
+				{
+					std::string nickMsg = ":" + oldNick + "!" + client->username + "@localhost NICK :" + nick;
+					sendResponse(fd, nickMsg);
+					std::map<std::string, Channel*>::iterator itChan;
+					for (itChan = _channels.begin(); itChan != _channels.end(); ++itChan)
+					{
+						Channel *chan = itChan->second;
+						bool isInChan = false;
+						for (size_t i = 0; i < chan->members.size(); i++)
+						{
+							if (chan->members[i]->fd == fd)
+							{
+								isInChan = true;
+								break;
+							}
+						}
+						if (isInChan)
+						{
+							chan->broadcast(nickMsg, fd);
+						}
+					}
 				}
 			}
 		}
