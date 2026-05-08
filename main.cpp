@@ -1,6 +1,16 @@
 #include "Server.hpp"
 #include <iostream>
 #include <cstdlib>
+#include <csignal>
+
+bool g_running = true;
+
+void signalHandler(int sig)
+{
+	(void)sig;
+	std::cout << "\nSignal recieved, server stopping" << std::endl;
+	g_running = false;
+}
 
 int main(int ac, char **av)
 {
@@ -10,20 +20,15 @@ int main(int ac, char **av)
 		return 1;
 	}
 
-	try
-	{
-		int port = std::atoi(av[1]);
-		std::string password = av[2];
+	signal(SIGINT, signalHandler);
+	signal(SIGQUIT, signalHandler);
 
-		Server ircServer(port, password);
-		ircServer.init();
-		ircServer.run();
-	}
-	catch (const std::exception &e)
-	{
-		std::cerr << "Error: " << e.what() << std::endl;
-		return 1;
-	}
+
+	int port = std::atoi(av[1]);
+	std::string password = av[2];
+	Server ircServer(port, password);
+	ircServer.init();
+	ircServer.run();
 
 	return 0;
 }

@@ -6,6 +6,10 @@
 #include <iostream>
 #include <stdexcept>
 #include <sstream>
+#include <cstdlib>
+
+
+extern bool g_running;
 
 Server::Server(int port, std::string password) : _port(port), _password(password), _server_fd(-1) {}
 
@@ -83,10 +87,14 @@ void Server::run()
 
 	std::cout << "Waiting for connections..." << std::endl;
 
-	while (true)
+	while (g_running)
 	{
 		if (poll(&_fds[0], _fds.size(), -1) == -1)
+		{
+			if (!g_running)
+				break;
 			throw std::runtime_error("Poll failed");
+		}
 
 
 		for (size_t i = 0; i < _fds.size(); i++)
@@ -228,26 +236,61 @@ void Server::processCommand(int fd, std::string commande)
 	}
 	else if (cmdName == "JOIN")
 	{
-		std::string chanName;
-		ss >> chanName;
+		std::string chanName, key;
+		ss >> chanName >> key; // on chope le channel et le mdp
 
 		if (!client->is_registered)
 		{
 			sendResponse(fd, "451 *:You have not registered");
 			return;
 		}
+
 		if (chanName.empty() || chanName[0] != '#')
 		{
 			sendResponse(fd, "403 " + client->nickname + " " + chanName + " :No channel");
 			return;
 		}
+
 		if (_channels.find(chanName) == _channels.end())
 		{
 			_channels[chanName] = new Channel(chanName);
 			_channels[chanName]->operators.push_back(client);
 			std::cout << CYAN << "Channel " << chanName << " created by " << client->nickname << RESET << std::endl;
 		}
+		else
+		{
+			Channel *chan = _channels[chanName];
 
+			if (chan->max_user > 0 && chan->members.size() >= (size_t)chan->max_user) // check de la limite user
+			{
+				sendResponse(fd, "471 " + client->nickname + " " + chanName + " :Cannot join channel (+1)");
+				return;
+			}
+
+			if (!chan->key.empty() && chan->key != key) // check du mdp
+			{
+				sendResponse(fd, "475 " + client->nickname + " " + chanName + " :Cannot join channel (+k)");
+				return;
+			}
+
+			if (chan->mode_i) // check de l'invite
+			{
+				bool isInvited = false;
+				for (size_t j = 0; j < chan->invited_user.size(); j++)
+				{
+					if (chan->invited_user[j] == client->nickname)
+					{
+						isInvited = true;
+						break;
+					}
+				}
+				if (!isInvited)
+				{
+					sendResponse(fd, "473 " + client->nickname + " " + chanName + " :Cannot join channel (+i)");
+					return;
+				}
+			}
+		}
 		Channel *chan = _channels[chanName];
 		bool isMember = false;
 		for (size_t i = 0; i < chan->members.size(); i++)
@@ -261,6 +304,7 @@ void Server::processCommand(int fd, std::string commande)
 			chan->broadcast(joinMsg, -1);
 		}
 	}
+
 	else if (cmdName == "PRIVMSG")
 	{
 		std::string target, text;
@@ -414,11 +458,27 @@ void Server::processCommand(int fd, std::string commande)
 		}
 		else
 		{
+			if (chan->mode_t)
+			{
+				bool isOP = false;
+				for (size_t j = 0; j < chan->operators.size(); j++)
+				{
+					if (chan->operators[j]->fd == fd)
+					{
+						isOP = true;
+						break;
+					}
+				}
+				if (!isOP)
+				{
+					sendResponse(fd, "482 " + client->nickname + " " + chanName + " :You're not channel operator");
+					return;
+				}
+			}
 			if (newTopic[1] == ':')
 				newTopic = newTopic.substr(2);
 			else
 				newTopic = newTopic.substr(1);
-
 			chan->topic = newTopic;
 			std::string msg = ":" + client->nickname + "!" + client->username + "@localhost TOPIC " + chanName + " :" + chan->topic;
 			chan->broadcast(msg, -1);
@@ -552,7 +612,7 @@ void Server::processCommand(int fd, std::string commande)
 					{
 						chan->key = param;
 						appliedModes += "k";
-						appliedModes += " " + param;
+						appliedParams += " " + param;
 					}
 				}
 				else
@@ -567,7 +627,7 @@ void Server::processCommand(int fd, std::string commande)
 				{
 					if (ss >> param) // on essaie de lire la limite
 					{
-						chan->max_user = std::atoi(param.c_str());
+						chan->max_user = atoi(param.c_str());
 						appliedModes += "l";
 						appliedParams += " " + param;
 					}
@@ -626,11 +686,82 @@ void Server::processCommand(int fd, std::string commande)
 				}
 			}
 		}
-		if (appliedModes != "+" && appliedModes != "-" && appliedModes.empty()) // si on a au moins un mode on l'annonce
+		if (appliedModes != "+" && appliedModes != "-" && !appliedModes.empty()) // si on a au moins un mode on l'annonce
 		{
 			std::string modeNotif = ":" + client->nickname + "!" + client->username + "@localhost MODE " + target + " " + appliedModes + appliedParams;
 			chan->broadcast(modeNotif, -1);
 		}
+	}
+	else if (cmdName == "PING")
+	{
+		std::string param;
+		ss >> param;
+		sendResponse(fd, "PONG " + param);
+		return;
+	}
+	else if (cmdName == "PART")
+	{
+		std::string chanName, reason;
+		ss >> chanName;
+		std::getline(ss, reason);
+
+		if (!reason.empty() && reason[0] == ' ')
+			reason.erase(0, 1);
+		if (!reason.empty() && reason[0] == ':')
+			reason.erase(0, 1);
+		if (reason.empty())
+			reason = "Leaving";
+
+		if (_channels.find(chanName) == _channels.end())
+		{
+			sendResponse(fd, "403 " + client->nickname + " " + chanName + " :No such channel");
+			return;
+		}
+
+		Channel *chan = _channels[chanName];
+		bool isMember = false;
+
+		for (std::vector<Client*>::iterator it = chan->members.begin(); it != chan->members.end(); ++it) // on cherche le client
+		{
+			if ((*it)->fd == fd)
+			{
+				isMember = true;
+
+				std::string partMsg = ":" + client->nickname + "!" + client->username + "@localhost PART " + " :" + reason;
+				chan->broadcast(partMsg, -1);
+				chan->members.erase(it);
+				break;
+			}
+		}
+
+		if (!isMember)
+		{
+			sendResponse(fd, "442 " + client->nickname + " " + chanName + " :You're not on that channel");
+			return;
+		}
+
+		// si il etait operateur on lui enleve ses privileges
+		for (std::vector<Client*>::iterator oit = chan->operators.begin(); oit != chan->operators.end(); ++oit)
+		{
+			if ((*oit)->fd == fd)
+			{
+				chan->operators.erase(oit);
+				break;
+			}
+		}
+
+		if (chan->members.empty()) // si ya plus personne on efface le channel
+		{
+			delete chan;
+			_channels.erase(chanName);
+		}
+
+	}
+	else if (cmdName == "QUIT")
+	{
+		std::string reason;
+		std::getline(ss, reason);
+		std::cout << "Client " << client->nickname << " wants to quit (" << reason << ")" << std::endl;
 	}
 }
 
