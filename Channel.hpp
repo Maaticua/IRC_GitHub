@@ -20,7 +20,7 @@ class Channel
 		std::string key;
 		int max_user;
 
-		Channel(std::string n) : name(n) {}
+		Channel(std::string n) : name(n), mode_i(false), mode_t(false), key(""), max_user(0) {}
 
 		void broadcast(std::string msg, int sender_fd)
 		{

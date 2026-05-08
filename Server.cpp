@@ -190,7 +190,10 @@ void Server::processCommand(int fd, std::string commande)
 
 	Client *client = _clients[fd];
 
-	if (cmdName == "PASS")
+
+	if (cmdName == "CAP")
+		return;
+	else if (cmdName == "PASS" || cmdName == "pass")
 	{
 		std::string check;
 		ss >> check;
@@ -230,10 +233,15 @@ void Server::processCommand(int fd, std::string commande)
 			{
 				client->nickname = nick;
 				std::cout << "Client fd " << fd << " is known as " << nick << std::endl;
+				if (!client->username.empty() && !client->is_registered)
+				{
+					client->is_registered = true;
+					sendResponse(fd, "001 " + client->nickname + " : Welcome to the IRC server");
+				}
 			}
 		}
 	}
-	else if (cmdName == "USER")
+	else if (cmdName == "USER" || cmdName == "user")
 	{
 		std::string user, host, server, real;
 		ss >> user >> host >> server;
@@ -251,7 +259,7 @@ void Server::processCommand(int fd, std::string commande)
 			}
 		}
 	}
-	else if (cmdName == "JOIN")
+	else if (cmdName == "JOIN" || cmdName == "join")
 	{
 		std::string chanName, key;
 		ss >> chanName >> key; // on chope le channel et le mdp
@@ -322,7 +330,7 @@ void Server::processCommand(int fd, std::string commande)
 		}
 	}
 
-	else if (cmdName == "PRIVMSG")
+	else if (cmdName == "PRIVMSG" || cmdName == "privmsg")
 	{
 		std::string target, text;
 		ss >> target;
@@ -374,7 +382,7 @@ void Server::processCommand(int fd, std::string commande)
 				sendResponse(fd, "401 " + client->nickname + " " + target + " :No such nick/channel");
 		}
 	}
-	else if (cmdName == "KICK")
+	else if (cmdName == "KICK" || cmdName == "kick")
 	{
 		std::string chanName, targetNick, reason;
 		ss >> chanName >> targetNick;
@@ -441,7 +449,7 @@ void Server::processCommand(int fd, std::string commande)
 			}
 		}
 	}
-	else if (cmdName == "TOPIC")
+	else if (cmdName == "TOPIC" || cmdName == "topic")
 	{
 		std::string chanName, newTopic;
 		ss >> chanName;
@@ -501,7 +509,7 @@ void Server::processCommand(int fd, std::string commande)
 			chan->broadcast(msg, -1);
 		}
 	}
-	else if (cmdName == "INVITE")
+	else if (cmdName == "INVITE" || cmdName == "invite")
 	{
 		std::string targetNick, chanName;
 		ss >> targetNick >> chanName;
@@ -562,7 +570,7 @@ void Server::processCommand(int fd, std::string commande)
 		sendResponse(fd, "341 " + client->nickname + " " + targetNick + " " + chanName);
 
 	}
-	else if (cmdName == "MODE")
+	else if (cmdName == "MODE" || cmdName == "mode")
 	{
 		std::string target, flags, param;
 		ss >> target >> flags;
@@ -709,14 +717,14 @@ void Server::processCommand(int fd, std::string commande)
 			chan->broadcast(modeNotif, -1);
 		}
 	}
-	else if (cmdName == "PING")
+	else if (cmdName == "PING" || cmdName == "ping")
 	{
 		std::string param;
 		ss >> param;
 		sendResponse(fd, "PONG " + param);
 		return;
 	}
-	else if (cmdName == "PART")
+	else if (cmdName == "PART" || cmdName == "part")
 	{
 		std::string chanName, reason;
 		ss >> chanName;
@@ -774,7 +782,7 @@ void Server::processCommand(int fd, std::string commande)
 		}
 
 	}
-	else if (cmdName == "QUIT")
+	else if (cmdName == "QUIT" || cmdName == "quit")
 	{
 		std::string reason;
 		std::getline(ss, reason);

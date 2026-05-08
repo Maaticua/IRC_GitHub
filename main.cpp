@@ -23,7 +23,6 @@ int main(int ac, char **av)
 	signal(SIGINT, signalHandler);
 	signal(SIGQUIT, signalHandler);
 
-
 	int port = std::atoi(av[1]);
 	std::string password = av[2];
 	Server ircServer(port, password);
