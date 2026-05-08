@@ -212,8 +212,25 @@ void Server::processCommand(int fd, std::string commande)
 			sendResponse(fd, "431 * : No nickname");
 		else
 		{
-			client->nickname = nick;
-			std::cout << "Client fd " << fd << " is known as " << nick << std::endl;
+			bool inUse = false;
+			std::map<int, Client*>::iterator it;
+			for (it = _clients.begin(); it != _clients.end(); ++it)
+			{
+				if (it->second->nickname == nick && it->second->fd != fd)
+				{
+					inUse = true;
+					break;
+				}
+			}
+			if (inUse)
+			{
+				sendResponse(fd, "433 * " + nick + " :Nickename is already in use");
+			}
+			else
+			{
+				client->nickname = nick;
+				std::cout << "Client fd " << fd << " is known as " << nick << std::endl;
+			}
 		}
 	}
 	else if (cmdName == "USER")
@@ -727,7 +744,7 @@ void Server::processCommand(int fd, std::string commande)
 			{
 				isMember = true;
 
-				std::string partMsg = ":" + client->nickname + "!" + client->username + "@localhost PART " + " :" + reason;
+				std::string partMsg = ":" + client->nickname + "!" + client->username + "@localhost PART " + chanName + " :" + reason;
 				chan->broadcast(partMsg, -1);
 				chan->members.erase(it);
 				break;
