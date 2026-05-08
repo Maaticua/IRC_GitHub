@@ -352,6 +352,30 @@ void Server::processCommand(int fd, std::string commande)
 			chan->members.push_back(client);
 			std::string joinMsg = ":" + client->nickname + "!" + client->username + "@localhost JOIN :" + chanName;
 			chan->broadcast(joinMsg, -1);
+
+			if (chan->topic.empty())
+				sendResponse(fd, "331 " + client->nickname + " " + chanName + " :No topic is set");
+			else
+				sendResponse(fd, "332" + client->nickname + " " + chanName + " :" + chan->topic);
+
+			std::string nameList = "353 " + client->nickname + " = " + chanName + " :";
+			for (size_t i = 0; i < chan->members.size(); i++)
+			{
+				bool isOp = false;
+				for (size_t j = 0; j < chan->operators.size(); j++)
+				{
+					if (chan->operators[j]->fd == chan->members[i]->fd)
+					{
+						isOp = true;
+						break;
+					}
+				}
+				if (isOp)
+					nameList += "@";
+				nameList += chan->members[i]->nickname + " ";
+			}
+			sendResponse(fd, nameList);
+			sendResponse(fd, "366 " + client->nickname + " " + chanName + " :End of /NAMES list");
 		}
 	}
 
