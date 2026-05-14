@@ -96,7 +96,6 @@ void Server::run()
 			throw std::runtime_error("Poll failed");
 		}
 
-
 		for (size_t i = 0; i < _fds.size(); i++)
 		{
 			if (_fds[i].revents & POLLIN)
@@ -831,11 +830,18 @@ void Server::processCommand(int fd, std::string commande)
 		}
 
 	}
-	else if (cmdName == "QUIT" || cmdName == "quit")
+	else if (cmdName == "QUIT")
 	{
 		std::string reason;
 		std::getline(ss, reason);
-		std::cout << "Client " << client->nickname << " wants to quit (" << reason << ")" << std::endl;
+
+		if (!reason.empty() && reason[0] == ' ') reason.erase(0, 1);
+		if (!reason.empty() && reason[0] == ':') reason.erase(0, 1);
+		if (reason.empty()) reason = "Client quit";
+
+		std::cout << "Client " << client->nickname << " has disconnected (" << reason << ")" << std::endl;
+
+		shutdown(fd, SHUT_RDWR);
 	}
 }
 
