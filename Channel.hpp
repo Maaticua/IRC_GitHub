@@ -28,7 +28,7 @@ class Channel
 				if (members[i]->fd != sender_fd)
 				{
 					std::string final_msg = msg + "\r\n";
-					send(members[i]->fd, final_msg.c_str(), final_msg.length(), 0);
+					members[i]->outputBuffer += final_msg;
 				}
 		}
 

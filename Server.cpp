@@ -89,6 +89,19 @@ void Server::run()
 
 	while (g_running)
 	{
+		for (size_t i = 1; i < _fds.size(); i++) // on commence à 1 pour ignorer _server_fd
+		{
+			int fd = _fds[i].fd;
+			if (_clients.count(fd))
+			{
+				if (!_clients[fd]->outputBuffer.empty())
+					_fds[i].events = POLLIN | POLLOUT;
+				else
+					_fds[i].events = POLLIN;
+			}
+		}
+
+		// l'unique appel à poll()
 		if (poll(&_fds[0], _fds.size(), -1) == -1)
 		{
 			if (!g_running)
@@ -96,8 +109,12 @@ void Server::run()
 			throw std::runtime_error("Poll failed");
 		}
 
+		// traitement des événements
 		for (size_t i = 0; i < _fds.size(); i++)
 		{
+			bool client_disconnected = false;
+
+			// evenement de lexture (POLLIN)
 			if (_fds[i].revents & POLLIN)
 			{
 				if (_fds[i].fd == _server_fd)
@@ -106,7 +123,30 @@ void Server::run()
 				}
 				else
 				{
+					size_t old_size = _fds.size();
 					handleClientMessage(i);
+					// si le client s'est déco handleClientMessage erase sur _fds
+					if (_fds.size() < old_size)
+					{
+						i--;
+						client_disconnected = true;
+					}
+				}
+			}
+
+			// evenement decriture (POLLOUT)
+			if (!client_disconnected && (_fds[i].revents & POLLOUT))
+			{
+				int fd = _fds[i].fd;
+				if (_clients.count(fd) && !_clients[fd]->outputBuffer.empty())
+				{
+					std::string &msg = _clients[fd]->outputBuffer;
+					ssize_t bytes_sent = send(fd, msg.c_str(), msg.length(), 0);
+
+					if (bytes_sent > 0)
+					{
+						msg.erase(0, bytes_sent);
+					}
 				}
 			}
 		}
@@ -848,8 +888,8 @@ void Server::processCommand(int fd, std::string commande)
 void Server::sendResponse(int fd, std::string reponse)
 {
 	std::string msg = reponse + "\r\n";
-	if (send(fd, msg.c_str(), msg.length(),0) == -1)
-		std::cerr << RED << "Error: send fail" << RESET << std::endl;
+	if (_clients.count(fd))
+		_clients[fd]->outputBuffer += msg;
 }
 
 void Server::leaveAllChannel(Client *client)
